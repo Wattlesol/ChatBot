@@ -138,14 +138,14 @@ retrieval_chain = RetrievalQA.from_chain_type(
 )
 
 
-# Routes
-@app.route('/chatbot-widget.js')
-def serve_widget():
-    return send_file('chatbot-widget.js')
+# # Routes
+# @app.route('/chatbot-widget.js')
+# def serve_widget():
+#     return send_file('chatbot-widget.js')
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return "Hello World!"
 
 @app.route("/chat", methods=["POST"])
 def chat():
