@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify, render_template, send_file
+from flask_cors import CORS
 from dotenv import load_dotenv
 import os
 import pickle
@@ -16,6 +17,7 @@ warnings.filterwarnings("ignore")
 
 # Initialize Flask app
 app = Flask(__name__)
+CORS(app)
 
 # Load environment variables
 load_dotenv()
@@ -186,4 +188,4 @@ def chat():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=8080)
+    app.run(debug=True, port=5000)
