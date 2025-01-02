@@ -9,3 +9,4 @@ streamlit
 bs4
 langchain_openai
 faiss-cpu
+flask_Cors
