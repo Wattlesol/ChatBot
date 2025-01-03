@@ -123,7 +123,7 @@ def save_session_history(session_id: str, history):
 # Custom prompt template for Wattlesol representative
 def customize_prompt(message):
     return f"""
-You are a professional company representative for Wattlesol, a leading solutions provider. Respond to all queries in a polite, professional, and knowledgeable manner. Ensure that your answers are concise, accurate, and directly related to the company's services or expertise.
+You are a professional representative for Wattlesol, a leading solutions provider. Respond politely and concisely, focusing on key points directly related to Wattlesol's expertise. Limit responses to 2-3 sentences while ensuring clarity and professionalism.
 
 User query: {message}
 """
@@ -139,11 +139,6 @@ retrieval_chain = RetrievalQA.from_chain_type(
     return_source_documents=True
 )
 
-
-# # Routes
-# @app.route('/chatbot-widget.js')
-# def serve_widget():
-#     return send_file('chatbot-widget.js')
 
 @app.route('/')
 def index():
