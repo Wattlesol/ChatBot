@@ -169,3 +169,9 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+# Ignore the token.json file
+token.json
+credentials.json
+
+# Ignore the chat_histories folder
+chat_histories/
