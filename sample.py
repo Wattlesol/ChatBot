@@ -19,6 +19,7 @@ from google.oauth2.credentials import Credentials
 from pytz import utc  # Add this for timezone handling
 import requests
 from xml.etree import ElementTree
+import re
 
 warnings.filterwarnings("ignore")
 
@@ -36,33 +37,10 @@ os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
 app = Flask(__name__)
 CORS(app)
 
-# urls = [
-#     "https://wattlesol.com/are-seo-services-worth-it",
-#     "https://wattlesol.com/about-us",
-#     "https://wattlesol.com/case-studies",
-#     "https://wattlesol.com/blogs",
-#     "https://wattlesol.com/contact-us",
-#     "https://wattlesol.com/faqs",
-#     "https://wattlesol.com/how-devops-can-save-disasters-in-production-grade-applications",
-#     "https://wattlesol.com/karatbars",
-#     "https://wattlesol.com/managed-it-services",
-#     "https://wattlesol.com/micro-services-are-the-future-of-seamless-operations-in-application-development",
-#     "https://wattlesol.com/contact-center",
-#     "https://wattlesol.com",
-#     "https://wattlesol.com/ormeus",
-#     "https://wattlesol.com/privacy-policy",
-#     "https://wattlesol.com/ppc-advertising",
-#     "https://wattlesol.com/softbank",
-#     "https://wattlesol.com/sales-and-marketing",
-#     "https://wattlesol.com/solutions",
-#     "https://wattlesol.com/software-development",
-#     "https://wattlesol.com/team",
-#     "https://wattlesol.com/terms-and-conditions",
-#     "https://wattlesol.com/staff-augmentation",
-#     "https://wattlesol.com/ui-ux",
-#     "https://wattlesol.com/why-staff-augmentation-is-the-best-solution-for-software-companies"
-# ]
+
 sitemap_url = "https://wattlesol.com/sitemap.xml"
+
+# scraping the data from all the given urls and save them into faiss db in faiss
 def scrape_urls_and_create_vector_store(urls):
     all_documents = []
 
@@ -89,6 +67,7 @@ def scrape_urls_and_create_vector_store(urls):
     print(f"Vector store saved at {vector_store_path}")
     return vector_store
 
+# loading the already scraped or new scrap and load
 def load_vector_store():
     # Check if both files exist
     if os.path.exists(f"{vector_store_path}/index.faiss") and os.path.exists(f"{vector_store_path}/index.pkl"):
@@ -101,15 +80,10 @@ def load_vector_store():
             print(f"Error loading vector store: {e}")
             raise e
     else:
-        print("Vector store files not found. Creating a new vector store...")
-        response = requests.get(sitemap_url)
-        if response.status_code != 200:
-            return jsonify({"error": f"Failed to fetch sitemap. HTTP Status: {response.status_code}"}), 500
-        
-        sitemap_content = response.content
-        root = ElementTree.fromstring(sitemap_content)
-        namespaces = {'ns': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
-        urls = [url_elem.text for url_elem in root.findall('.//ns:loc', namespaces)]
+        sitemap_file = os.path.join(files_dir,"sitemap_urls.json")
+        with open(sitemap_file,'r')as f:
+            sitemap_data = json.load(f)
+            urls = sitemap_data['urls']        
         return scrape_urls_and_create_vector_store(urls)
 
 # Session history management
@@ -163,6 +137,7 @@ def format_history(history, max_messages=10):
         ]
     )
 
+# Getting All Google calender Booking Events
 def fetch_calendar_events():
     """
     Fetch all booked slots from the current date and time onward.
@@ -187,7 +162,7 @@ def fetch_calendar_events():
         print(f"Error fetching calendar events: {e}")
         raise e
 
-
+# Formating the The Calender Booking events
 def format_booked_slots(events):
     """
     Format booked slots into a readable string for the LLM.
@@ -202,8 +177,7 @@ def format_booked_slots(events):
         booked_slots.append(slot)
     return "\n".join(booked_slots)
 
-
-# Detect intent for booking appointments
+# Detect intent for booking appointments or regular query
 def detect_intent(message):
     keywords = ["book", "appointment", "schedule", "meeting"]
     for keyword in keywords:
@@ -211,57 +185,193 @@ def detect_intent(message):
             return "appointment_booking"
     return "regular_query"
 
+# generate a llm prompt for chat either for appointment or regular query
+# def customize_prompt(message:str, booked_slots):
+#     """
+#     Generate a customized prompt based on user intent, focusing only on booked slots.
+#     """
+#     intent = detect_intent(message)
+#     if intent == "appointment_booking":
+#         # Format booked slots for context
+#         booked_slots_text = booked_slots if booked_slots else "No booked slots available."
 
-def customize_prompt(message:str, booked_slots):
+#         return f"""
+#         You are a professional representative for Wattlesol (Not The CEO), a leading solutions provider.
+#         The user has expressed interest in booking an appointment. Here is their message:
+#         "{message}"
+
+#         Current Context:
+#         - Office working hours: 09:00 AM to 05:00 PM.
+#         - Working days: Monday to Friday.
+#         - Booked slots:
+#         {booked_slots_text}
+
+#         Task:
+#         Based on the user's message and the context provided:
+#         - Suggest the best available times for booking an appointment within office hours.
+#         - Avoid conflicts with the booked slots provided.
+#         - Ensure the response is polite, professional, and formatted with exact date, day, and time in AM/PM format.
+#         """
+
+#     # Default response for other intents
+#     return f"""
+#     You are a professional representative for Wattlesol (Not The CEO), a leading solutions provider. Respond politely and concisely, focusing on key points directly related to Wattlesol's expertise. Limit responses to 2-3 sentences while ensuring clarity and professionalism.
+
+#     User query: {message}
+#     """
+
+# customize a llm prompt for chat either for appointment or regular query
+def customize_prompt(message: str, booked_slots: str, base_prompts:dict):
     """
-    Generate a customized prompt based on user intent, focusing only on booked slots.
+    Customize a base prompt based on the user's intent and additional context.
+
+    Args:
+        message (str): The user's message.
+        booked_slots (str): A string of booked slots for appointment booking.
+        base_prompts (dict): The path to the JSON file containing the base prompts.
+
+    Returns:
+        str: A customized prompt based on the user's intent.
     """
-    intent = detect_intent(message)
-    if intent == "appointment_booking":
-        # Format booked slots for context
-        booked_slots_text = booked_slots if booked_slots else "No booked slots available."
+    try:
+        # Detect user intent
+        intent = detect_intent(message)
 
-        return f"""
-        You are a professional representative for Wattlesol (Not The CEO), a leading solutions provider.
-        The user has expressed interest in booking an appointment. Here is their message:
-        "{message}"
+        if intent == "appointment_booking":
+            # Format the "booking_prompt" dynamically with booked slots and the user's message
+            base_prompt = base_prompts.get("booking_prompt", "")
+            booked_slots_text = booked_slots if booked_slots else "No booked slots available."
+            customized_prompt = base_prompt.format(message=message, booked_slots_text=booked_slots_text)
+        else:
+            # Format the "regular_prompt" dynamically with the user's message
+            base_prompt = base_prompts.get("regular_prompt", "")
+            customized_prompt = base_prompt.format(message=message)
 
-        Current Context:
-        - Office working hours: 09:00 AM to 05:00 PM.
-        - Working days: Monday to Friday.
-        - Booked slots:
-        {booked_slots_text}
+        return customized_prompt
+
+    except Exception as e:
+        return f"Error: An unexpected error occurred: {str(e)}"
+
+def generate_prompts_logic(vector_store, model, files_dir):
+    """
+    Generate prompts based on the vector store context, invoke the LLM, and save results to a file.
+
+    Args:
+        vector_store: The FAISS vector store object.
+        model: The LLM model object.
+        files_dir: Directory to save generated prompts.
+
+    Returns:
+        dict: A dictionary containing the generated prompts and the file path.
+    """
+    try:
+        # Step 1: Get context from the vector store
+        top_docs = vector_store.similarity_search("Provide context for generating prompts", k=5)
+        context = "\n\n".join([doc.page_content for doc in top_docs])
+
+        # Step 2: Define the example dictionary
+        example_dict = {
+            "booking_prompt": """You are a professional representative for Wattlesol (Not The CEO), a leading solutions provider.
+            The user has expressed interest in booking an appointment. Here is their message:
+            "{message}"
+
+            Current Context:
+            - Office working hours: 09:00 AM to 05:00 PM.
+            - Working days: Monday to Friday.
+            - Booked slots:
+            {booked_slots_text}
+
+            Task:
+            Based on the user's message and the context provided:
+            - Suggest the best available times for booking an appointment within office hours.
+            - Avoid conflicts with the booked slots provided.
+            - Ensure the response is polite, professional, and formatted with exact date, day, and time in AM/PM format.
+            """,
+            "regular_prompt": """You are a professional representative for Wattlesol (Not The CEO), a leading solutions provider.
+            Respond politely and concisely, focusing on key points directly related to Wattlesol's expertise. Limit responses to 2-3 sentences while ensuring clarity and professionalism.
+
+            User query: {message}
+            """
+        }
+
+        # Step 3: Generate the LLM prompt
+        llm_prompt = f"""
+        Below is an example of a dictionary containing two prompts: one for booking appointments and one for regular queries. 
+        The examples are specific to Wattlesol. Use the following example to generate similar prompts tailored to the website 
+        represented by the FAISS index context.
+
+        Example Dictionary:
+        {json.dumps(example_dict, indent=4)}
+
+        Context:
+        {context}
 
         Task:
-        Based on the user's message and the context provided:
-        - Suggest the best available times for booking an appointment within office hours.
-        - Avoid conflicts with the booked slots provided.
-        - Ensure the response is polite, professional, and formatted with exact date, day, and time in AM/PM format.
+        Based on the above context:
+        - Generate a JSON object with two keys: "booking_prompt" and "regular_prompt".
+        - Ensure that the generated prompts align with the context provided by the FAISS index.
+        - The style and tone of the prompts must follow the examples provided above.
+        - Ensure that the "booking_prompt" helps users book an appointment professionally, avoiding scheduling conflicts.
+        - Ensure that the "regular_prompt" provides concise, polite answers related to the expertise of the company.
+
+        Output Format:
+        {{
+            "booking_prompt": "...",
+            "regular_prompt": "..."
+        }}
         """
 
-    # Default response for other intents
-    return f"""
-    You are a professional representative for Wattlesol (Not The CEO), a leading solutions provider. Respond politely and concisely, focusing on key points directly related to Wattlesol's expertise. Limit responses to 2-3 sentences while ensuring clarity and professionalism.
+        # Step 4: Invoke LLM and extract response
+        llm_response = model.invoke(llm_prompt, config={"max_tokens": 1000})
+        generated_text = llm_response.content
 
-    User query: {message}
-    """
+        # Use regex to extract the dictionary portion
+        match = re.search(r"\{.*\}", generated_text, re.DOTALL)
+        if match:
+            json_text = match.group(0)
+            try:
+                generated_dict = json.loads(json_text)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Failed to parse JSON: {str(e)}\nRaw Output: {json_text}")
+        else:
+            raise ValueError(f"Failed to extract JSON from LLM output. Raw Output: {generated_text}")
+        # update the Global base_prompts
+        global base_prompts
+        base_prompts = generated_dict
+        # Step 5: Save the generated prompts to a file
+        output_file = os.path.join(files_dir, "generated_prompts.json")
+        with open(output_file, "w") as f:
+            json.dump(generated_dict, f, indent=4)
+
+        return {"prompts": generated_dict, "saved_to": output_file}
+    except Exception as e:
+        raise RuntimeError(f"Error occurred while generating prompts: {str(e)}")
 
 
 # Initialize model and parser
 model = ChatGroq(model="llama-3.1-8b-instant")
 parser = StrOutputParser()
+
+# Defining the important directories
 history_dir = "chat_histories"
+files_dir = "important_files"
 # Ensure history directory exists
 if not os.path.exists(history_dir):
     os.makedirs(history_dir)
+if not os.path.exists(files_dir):
+    os.makedirs(files_dir)
 # VectorStore path
 vector_store_path = "faiss_index"
 # Google Calendar API settings
 SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
-TOKEN_PATH = 'token.json'
-
+TOKEN_PATH = os.path.join(files_dir,'token.json')
 # Initialize vector store
 vector_store = load_vector_store()
+# Load base prompts from the JSON file
+prompt_file = os.path.join(files_dir,"generated_prompts.json")
+with open(prompt_file, "r") as file:
+    base_prompts = json.load(file)
+
 
 # Retrieval chain for refining answers
 retriever = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 5})
@@ -288,9 +398,8 @@ def chat():
 
         # Format history for context
         formatted_history = format_history(history)
-
         # Generate the customized prompt
-        message_prompt = customize_prompt(message,booked_slots)
+        message_prompt = customize_prompt(message,booked_slots,base_prompts)
 
         # Combine formatted history with the customized prompt
         query_with_history = f"{formatted_history}\n\n{message_prompt}"
@@ -317,6 +426,7 @@ def rescrape_sitemap():
     try:
         data = request.json
         sitemap_url = data.get("sitemap_url")
+        print('Rescraping...:', sitemap_url)
         
         if not sitemap_url:
             return jsonify({"error": "Sitemap URL is required"}), 400
@@ -337,6 +447,17 @@ def rescrape_sitemap():
         
         print(f"Extracted {len(urls)} URLs from sitemap.")
         
+        # Save the sitemap URL and extracted URLs to a JSON file
+        output_data = {
+            "sitemap_url": sitemap_url,
+            "extracted_urls": urls
+        }
+        sitemap_file = os.path.join(files_dir,"sitemap_urls.json")
+        with open(sitemap_file, "w") as file:
+            json.dump(output_data, file, indent=4)
+        
+        print(f"Sitemap URL and extracted URLs saved to {sitemap_file}.")
+        
         # Scrape and process the data
         new_vector_store = scrape_urls_and_create_vector_store(urls)
         
@@ -344,117 +465,28 @@ def rescrape_sitemap():
         global vector_store
         vector_store = new_vector_store
         
-        return jsonify({"message": "Rescraping completed and FAISS index updated successfully.", "url_count": len(urls)})
+        return jsonify({
+            "message": "Rescraping completed and FAISS index updated successfully.",
+            "url_count": len(urls),
+            "saved_to": sitemap_file
+        })
     except Exception as e:
         print(f"Error occurred during rescraping: {e}")
         return jsonify({"error": str(e)}), 500
 
-import re
-import json
-import os
 
-@app.route('/generate-prompts', methods=['POST'])
-def generate_prompts():
+@app.route('/generate-ai-prompts', methods=['POST'])
+def generate_ai_prompts():
     try:
-        # Load the local FAISS index
+        # Ensure the vector store is loaded
         global vector_store
         if not vector_store:
             vector_store = load_vector_store()
 
-        # Get top documents from the vector store for context
-        top_docs = vector_store.similarity_search("Provide context for generating prompts", k=5)
-        context = "\n\n".join([doc.page_content for doc in top_docs])
+        # Call the merged function
+        result = generate_prompts_logic(vector_store, model, files_dir)
 
-        # Example dictionary structure to generate
-        example_dict = {
-            "booking_prompt": """You are a professional representative for Wattlesol (Not The CEO), a leading solutions provider.
-            The user has expressed interest in booking an appointment. Here is their message:
-            "{message}"
-
-            Current Context:
-            - Office working hours: 09:00 AM to 05:00 PM.
-            - Working days: Monday to Friday.
-            - Booked slots:
-            {booked_slots_text}
-
-            Task:
-            Based on the user's message and the context provided:
-            - Suggest the best available times for booking an appointment within office hours.
-            - Avoid conflicts with the booked slots provided.
-            - Ensure the response is polite, professional, and formatted with exact date, day, and time in AM/PM format.
-            """,
-            "regular_prompt": """You are a professional representative for Wattlesol (Not The CEO), a leading solutions provider.
-            Respond politely and concisely, focusing on key points directly related to Wattlesol's expertise. Limit responses to 2-3 sentences while ensuring clarity and professionalism.
-
-            User query: {message}
-            """
-        }
-
-        # Create a prompt for LLM
-        llm_prompt = f"""
-        Below is an example of a dictionary containing two prompts: one for booking appointments and one for regular queries. 
-        The examples are specific to Wattlesol. Use the following example to generate similar prompts tailored to the website 
-        represented by the FAISS index context.
-
-        Example Dictionary:
-        {json.dumps(example_dict, indent=4)}
-
-        Context:
-        {context}
-
-        Task:
-        Based on the above context:
-        - Generate a JSON object with two keys: "booking_prompt" and "regular_prompt".
-        - Ensure that the generated prompts align with the context provided by the FAISS index.
-        - The style and tone of the prompts must follow the examples provided above.
-        - Ensure that the "booking_prompt" helps users book an appointment professionally, avoiding scheduling conflicts.
-        - Ensure that the "regular_prompt" provides concise, polite answers related to the expertise of the company.
-
-        Output Format:
-        {{
-            "booking_prompt": "...",
-            "regular_prompt": "..."
-        }}
-        """
-        
-
-        # Pass the string prompt to the LLM
-        llm_response = model.invoke(llm_prompt, config={"max_tokens": 1000})
-
-        # Extract the result content directly from the AIMessage object
-        generated_text = llm_response.content  # Access the content attribute
-
-        # Log the raw output for debugging
-        # print("Generated text:", generated_text)
-
-        # Use regex to extract the dictionary portion
-        match = re.search(r"\{.*\}", generated_text, re.DOTALL)
-        if match:
-            json_text = match.group(0)  # Extract the dictionary portion
-            
-            # Clean and parse the JSON string
-            try:
-                generated_dict = json.loads(json_text)
-            except json.JSONDecodeError as json_error:
-                # If JSON parsing fails, log the issue and raw output
-                return jsonify({
-                    "error": "Failed to parse JSON from extracted LLM output.",
-                    "details": str(json_error),
-                    "raw_output": json_text
-                }), 500
-        else:
-            # Handle case where regex fails to find a valid JSON block
-            return jsonify({
-                "error": "Failed to extract JSON from LLM output.",
-                "raw_output": generated_text
-            }), 500
-
-        # Save the generated prompts to a JSON file
-        output_file = "generated_prompts.json"
-        with open(output_file, "w") as f:
-            json.dump(generated_dict, f, indent=4)
-
-        return jsonify({"message": "Prompts generated successfully.", "prompts": generated_dict, "saved_to": output_file})
+        return jsonify({"message": "Prompts generated successfully.", **result})
     except Exception as e:
         print(f"Error occurred while generating prompts: {e}")
         return jsonify({"error": str(e)}), 500
