@@ -71,6 +71,15 @@ class DatabaseManager:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sitemaps (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                sitemap_url TEXT NOT NULL,
+                extracted_url TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(sitemap_url, extracted_url)
+            )
+        """)
         conn.commit()
 
     def save_base_prompts(self, booking_prompt, regular_prompt):
@@ -94,6 +103,28 @@ class DatabaseManager:
         """
         cursor.execute(query)
         return cursor.fetchone()
+    
+    def save_sitemap_to_db(self, sitemap_url, urls):
+        """
+        Save a single sitemap URL and its extracted URLs to the database.
+        Remove any existing sitemaps before saving the new one.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        # Delete all existing sitemap entries
+        cursor.execute("DELETE FROM sitemaps")
+        conn.commit()
+
+        # Insert the new sitemap URL and its URLs
+        query = """
+            INSERT INTO sitemaps (sitemap_url, extracted_url)
+            VALUES (%s, %s)
+        """
+        for url in urls:
+            cursor.execute(query, (sitemap_url, url))
+        conn.commit()
+
 
 class WattlesolChatBot:
     def __init__(self):
@@ -129,15 +160,33 @@ class WattlesolChatBot:
         return {}
 
     def load_vector_store(self):
+        # Check if the vector store exists on disk
         if os.path.exists(f"{self.vector_store_path}/index.faiss") and os.path.exists(f"{self.vector_store_path}/index.pkl"):
             try:
                 return FAISS.load_local(self.vector_store_path, OpenAIEmbeddings(), allow_dangerous_deserialization=True)
             except Exception as e:
                 raise RuntimeError(f"Error loading vector store: {e}")
         else:
-            sitemap_file = os.path.join(self.files_dir, "sitemap_urls.json")
-            with open(sitemap_file, 'r') as f:
-                urls = json.load(f)['extracted_urls']
+            # Retrieve the latest sitemap URLs from the database
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor(dictionary=True)
+
+            # Get the latest sitemap and its URLs
+            query = "SELECT DISTINCT sitemap_url, extracted_url FROM sitemaps ORDER BY created_at DESC"
+            cursor.execute(query)
+            rows = cursor.fetchall()
+
+            if not rows:
+                raise RuntimeError("No sitemap data found in the database.")
+
+            # Extract the sitemap URLs from the database rows
+            urls = [row['extracted_url'] for row in rows]
+
+            # If no URLs are found, raise an error
+            if not urls:
+                raise RuntimeError("No URLs found in the latest sitemap.")
+
+            # Scrape the URLs and create a vector store
             return self.scrape_urls_and_create_vector_store(urls)
 
     def scrape_urls_and_create_vector_store(self, urls):
@@ -236,6 +285,7 @@ class WattlesolChatBot:
         history = session_data["history"]
         booked_slots = session_data["booked_slots"]
         formatted_history = self.format_history(history)  # Correct usage here
+
         message_prompt = self.customize_prompt(message, booked_slots)
         query_with_history = f"{formatted_history}\n\n{message_prompt}"
 
@@ -263,8 +313,11 @@ class WattlesolChatBot:
                 for msg in recent_messages
             ]
         )
-
+    
     def rescrape_sitemap(self, sitemap_url):
+        """
+        Rescrape a sitemap and update the database with its URLs.
+        """
         response = requests.get(sitemap_url)
         if response.status_code != 200:
             raise RuntimeError(f"Failed to fetch sitemap. HTTP Status: {response.status_code}")
@@ -273,11 +326,15 @@ class WattlesolChatBot:
         root = ElementTree.fromstring(sitemap_content)
         namespaces = {'ns': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
 
+        # Extract URLs from the sitemap
         urls = [url_elem.text for url_elem in root.findall('.//ns:loc', namespaces)]
-        sitemap_file = os.path.join(self.files_dir, "sitemap_urls.json")
-        with open(sitemap_file, "w") as file:
-            json.dump({"sitemap_url": sitemap_url, "extracted_urls": urls}, file, indent=4)
+        if not urls:
+            raise RuntimeError("No URLs found in the sitemap.")
 
+        # Save sitemap and URLs to the database
+        self.db_manager.save_sitemap_to_db(sitemap_url, urls)
+
+        # Update the vector store
         self.vector_store = self.scrape_urls_and_create_vector_store(urls)
         return len(urls)
 
@@ -359,6 +416,8 @@ class WattlesolChatBot:
             return {"prompts": generated_dict}
         except Exception as e:
             raise RuntimeError(f"Error occurred while generating prompts: {str(e)}")
+        
+
 # Flask app
 app = Flask(__name__)
 CORS(app)
@@ -396,6 +455,43 @@ def generate_ai_prompts():
         return jsonify({"message": "Prompts generated successfully.", **result})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/base-prompts', methods=['GET'])
+def get_latest_base_prompts():
+    try:
+        prompts = chatbot.db_manager.get_latest_base_prompts()
+        if not prompts:
+            return jsonify({"error": "No base prompts found."}), 404
+        return jsonify({
+            "booking_prompt": prompts["booking_prompt"],
+            "regular_prompt": prompts["regular_prompt"]
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/chat-history/<session_id>', methods=['GET'])
+def get_chat_history(session_id):
+    try:
+        session_data = chatbot.get_session_history(session_id)
+        history = session_data["history"]
+        
+        # Format the complete chat history into a readable list
+        formatted_history = [
+            {
+                "role": "User" if isinstance(msg, HumanMessage) else "Bot",
+                "content": msg.content
+            }
+            for msg in history.messages
+        ]
+        
+        return jsonify({
+            "session_id": session_id,
+            "booked_slots": session_data["booked_slots"],
+            "history": formatted_history
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
