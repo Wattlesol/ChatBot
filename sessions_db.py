@@ -356,7 +356,7 @@ class WattlesolChatBot:
 
                 Task:
                 Based on the user's message and the context provided:
-                - Suggest the best available times for booking an appointment within office hours.
+                - Suggest the best available times for booking an appointment, ensuring that the times are in the future and within office hours.
                 - Avoid conflicts with the booked slots provided.
                 - Ensure the response is polite, professional, and formatted with exact date, day, and time in AM/PM format.
                 """,
