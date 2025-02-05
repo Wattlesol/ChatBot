@@ -3,23 +3,30 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 import os , json
 import pickle
-from langchain_groq import ChatGroq
-from langchain_core.output_parsers import StrOutputParser
+# from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
 from langchain_core.chat_history import InMemoryChatMessageHistory
 from langchain_community.document_loaders import WebBaseLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
-from langchain.chains import RetrievalQA
 import warnings
 from datetime import datetime, timedelta ,timezone
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
-from pytz import utc  # Add this for timezone handling
 import requests
 from xml.etree import ElementTree
 import re
+from langchain_core.tools import tool
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import MessagesPlaceholder
+from langchain.tools.retriever import create_retriever_tool
+from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain.agents import AgentExecutor
+from langchain.prompts import PromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
+# from langchain_experimental.agents import create_openai_tools_agent
+from langchain.agents import create_openai_functions_agent
 
 warnings.filterwarnings("ignore")
 
@@ -36,6 +43,16 @@ os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
 # Initialize Flask app
 app = Flask(__name__)
 CORS(app)
+
+# Defining the important directories
+history_dir = "chat_histories"
+files_dir = "important_files"
+
+# Ensure history directory exists
+if not os.path.exists(history_dir):
+    os.makedirs(history_dir)
+if not os.path.exists(files_dir):
+    os.makedirs(files_dir)
 
 
 sitemap_url = "https://wattlesol.com/sitemap.xml"
@@ -101,14 +118,12 @@ def get_session_history(session_id: str):
     # If no session file exists, fetch calendar data and initialize a new session
     print(f"No session file found for {session_id}. Initializing a new session.")
 
-    events = fetch_calendar_events()
-    booked_slots = format_booked_slots(events)
-
+   
     # Initialize session history
     history = InMemoryChatMessageHistory()
 
     # Save the new session history to a file
-    session_data = {"history": history, "booked_slots": booked_slots}
+    session_data = {"history": history}
     save_session_history(session_id, session_data)
 
     return session_data
@@ -177,51 +192,8 @@ def format_booked_slots(events):
         booked_slots.append(slot)
     return "\n".join(booked_slots)
 
-# Detect intent for booking appointments or regular query
-def detect_intent(message):
-    keywords = ["book", "appointment", "schedule", "meeting"]
-    for keyword in keywords:
-        if keyword in message.lower():
-            return "appointment_booking"
-    return "regular_query"
-
-# generate a llm prompt for chat either for appointment or regular query
-# def customize_prompt(message:str, booked_slots):
-#     """
-#     Generate a customized prompt based on user intent, focusing only on booked slots.
-#     """
-#     intent = detect_intent(message)
-#     if intent == "appointment_booking":
-#         # Format booked slots for context
-#         booked_slots_text = booked_slots if booked_slots else "No booked slots available."
-
-#         return f"""
-#         You are a professional representative for Wattlesol (Not The CEO), a leading solutions provider.
-#         The user has expressed interest in booking an appointment. Here is their message:
-#         "{message}"
-
-#         Current Context:
-#         - Office working hours: 09:00 AM to 05:00 PM.
-#         - Working days: Monday to Friday.
-#         - Booked slots:
-#         {booked_slots_text}
-
-#         Task:
-#         Based on the user's message and the context provided:
-#         - Suggest the best available times for booking an appointment within office hours.
-#         - Avoid conflicts with the booked slots provided.
-#         - Ensure the response is polite, professional, and formatted with exact date, day, and time in AM/PM format.
-#         """
-
-#     # Default response for other intents
-#     return f"""
-#     You are a professional representative for Wattlesol (Not The CEO), a leading solutions provider. Respond politely and concisely, focusing on key points directly related to Wattlesol's expertise. Limit responses to 2-3 sentences while ensuring clarity and professionalism.
-
-#     User query: {message}
-#     """
-
 # customize a llm prompt for chat either for appointment or regular query
-def customize_prompt(message: str, booked_slots: str, base_prompts:dict):
+def customize_prompt(message: str,  base_prompts:dict):
     """
     Customize a base prompt based on the user's intent and additional context.
 
@@ -234,18 +206,18 @@ def customize_prompt(message: str, booked_slots: str, base_prompts:dict):
         str: A customized prompt based on the user's intent.
     """
     try:
-        # Detect user intent
-        intent = detect_intent(message)
+        # # Detect user intent
+        # intent = detect_intent(message)
 
-        if intent == "appointment_booking":
-            # Format the "booking_prompt" dynamically with booked slots and the user's message
-            base_prompt = base_prompts.get("booking_prompt", "")
-            booked_slots_text = booked_slots if booked_slots else "No booked slots available."
-            customized_prompt = base_prompt.format(message=message, booked_slots_text=booked_slots_text)
-        else:
+        # if intent == "appointment_booking":
+        #     # Format the "booking_prompt" dynamically with booked slots and the user's message
+        #     base_prompt = base_prompts.get("booking_prompt", "")
+        #     booked_slots_text = booked_slots if booked_slots else "No booked slots available."
+        #     customized_prompt = base_prompt.format(message=message, booked_slots_text=booked_slots_text)
+        # else:
             # Format the "regular_prompt" dynamically with the user's message
-            base_prompt = base_prompts.get("regular_prompt", "")
-            customized_prompt = base_prompt.format(message=message)
+        base_prompt = base_prompts.get("regular_prompt", "")
+        customized_prompt = base_prompt.format(message=message)
 
         return customized_prompt
 
@@ -347,19 +319,78 @@ def generate_prompts_logic(vector_store, model, files_dir):
     except Exception as e:
         raise RuntimeError(f"Error occurred while generating prompts: {str(e)}")
 
+@tool(parse_docstring=True)
+def book_appointment(user_email: str, appointment_time: str, duration_minutes: int = 30):
+    """
+    Books an appointment in Google Calendar.
+
+    Args:
+        user_email (str): The email of the attendee.
+        appointment_time (str): The desired appointment start time in ISO format ('YYYY-MM-DDTHH:MM:SS').
+        duration_minutes (int, optional): Duration of the appointment in minutes. Defaults to 30.
+
+    Returns:
+        dict: Confirmation details or an error message.
+    """
+    try:
+        print(f"📅 Booking appointment for {user_email} on {appointment_time} for {duration_minutes} minutes.")
+
+        # Convert provided time to datetime object
+        start_time = datetime.fromisoformat(appointment_time)
+        end_time = start_time + timedelta(minutes=duration_minutes)
+
+        # Authenticate with Google Calendar API
+        creds = Credentials.from_authorized_user_file(TOKEN_PATH)
+        service = build('calendar', 'v3', credentials=creds)
+
+        # ✅ Step 1: Fetch existing booked slots
+        events_result = service.events().list(
+            calendarId='primary',
+            timeMin=start_time.isoformat() + "Z",
+            timeMax=end_time.isoformat() + "Z",
+            singleEvents=True,
+            orderBy='startTime'
+        ).execute()
+        
+        events = events_result.get('items', [])
+
+        # ✅ Step 2: Check for conflicts
+        if events:
+            print("❌ Time slot is already booked. Cancelling request.")
+            return {"error": "The selected time slot is already booked. Please choose another time."}
+
+        # ✅ Step 3: Create the appointment
+        event = {
+            "summary": "Appointment with Wattlesol Representative",
+            "location": "Virtual or Office",
+            "description": f"Meeting scheduled by {user_email}.",
+            "start": {"dateTime": start_time.isoformat(), "timeZone": "UTC"},
+            "end": {"dateTime": end_time.isoformat(), "timeZone": "UTC"},
+            "attendees": [{"email": user_email}],
+            "reminders": {"useDefault": True},
+        }
+
+        created_event = service.events().insert(calendarId='primary', body=event).execute()
+
+        print(f"✅ Appointment successfully created! Event ID: {created_event['id']}")
+        print(f"📌 View event: {created_event['htmlLink']}")
+
+        return {
+            "message": "Appointment booked successfully.",
+            "event_id": created_event["id"],
+            "event_link": created_event["htmlLink"],
+            "start_time": start_time.strftime('%A, %b %d, %Y, %I:%M %p'),
+            "end_time": end_time.strftime('%I:%M %p')
+        }
+
+    except Exception as e:
+        print(f"⚠️ Error occurred while booking appointment: {e}")
+        return {"error": str(e)}
+
 
 # Initialize model and parser
-model = ChatGroq(model="llama-3.1-8b-instant")
-parser = StrOutputParser()
+llm = ChatOpenAI(temperature=0)
 
-# Defining the important directories
-history_dir = "chat_histories"
-files_dir = "important_files"
-# Ensure history directory exists
-if not os.path.exists(history_dir):
-    os.makedirs(history_dir)
-if not os.path.exists(files_dir):
-    os.makedirs(files_dir)
 # VectorStore path
 vector_store_path = "faiss_index"
 # Google Calendar API settings
@@ -367,20 +398,39 @@ SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 TOKEN_PATH = os.path.join(files_dir,'token.json')
 # Initialize vector store
 vector_store = load_vector_store()
-# Load base prompts from the JSON file
-prompt_file = os.path.join(files_dir,"generated_prompts.json")
-with open(prompt_file, "r") as file:
-    base_prompts = json.load(file)
+
+retrieval_tool = create_retriever_tool(
+    vector_store.as_retriever(),
+    name="company_general_chat",
+    description="""Useful when you need to answer general queries related to the company's services, policies, and FAQs.
+    Not useful for handling appointment bookings or any user-specific account-related inquiries.""",
+)
+
+
+
+tools = [retrieval_tool, book_appointment]
 
 
 # Retrieval chain for refining answers
 retriever = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 5})
-retrieval_chain = RetrievalQA.from_chain_type(
-    llm=model,
-    retriever=retriever,
-    return_source_documents=True
-)
 
+system_prompt = '''
+    You are a professional representative for Wattlesol, a leading solutions provider. 
+    Your responses should always be polite, professional, and concise, focusing on key points related to Wattlesol's expertise. 
+    For normal user queries, respond clearly in 2-3 sentences. For function-calling queries, identify the necessary action and guide the user accordingly.
+'''
+prompt = ChatPromptTemplate.from_messages(
+    [SystemMessagePromptTemplate(prompt=PromptTemplate(input_variables=[], template=system_prompt)),
+     MessagesPlaceholder(variable_name='chat_history', optional=True),
+     HumanMessagePromptTemplate(prompt=PromptTemplate(
+         input_variables=['input'], template='{input}')),
+     MessagesPlaceholder(variable_name='agent_scratchpad')])
+
+agent = create_openai_functions_agent(llm, tools, prompt)
+agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
+
+
+# ✅ Define the chatbot endpoint with agent execution
 @app.route('/chat', methods=['POST'])
 def chat():
     try:
@@ -391,31 +441,32 @@ def chat():
         if not session_id or not message:
             return jsonify({"error": "Session ID and message are required"}), 400
 
-        # Get or initialize session data
+        # 🗂 Retrieve chat history
         session_data = get_session_history(session_id)
-        history = session_data["history"]
-        booked_slots = session_data["booked_slots"]
+        history = session_data.get("history", [])
 
-        # Format history for context
-        formatted_history = format_history(history)
-        # Generate the customized prompt
-        message_prompt = customize_prompt(message,booked_slots,base_prompts)
+        conversational_agent_executor = RunnableWithMessageHistory(
+            agent_executor,
+            lambda session_id: history,
+            input_messages_key="input",
+            output_messages_key="output",
+            history_messages_key="chat_history",
+        )
 
-        # Combine formatted history with the customized prompt
-        query_with_history = f"{formatted_history}\n\n{message_prompt}"
+        # 🛠 Invoke the agent executor
+        agent_response = conversational_agent_executor.invoke(
+            {"input": message},
+            config={"configurable": {"session_id": session_id}}
+        )
 
-        # Pass the combined query to the retrieval chain
-        response = retrieval_chain.invoke({"query": query_with_history}, config={"max_tokens": 300})
-        result = response.get("result", "No response generated.")
-        source_documents = response.get("source_documents", [])
-
-        # Add user and bot messages to the history
-        history.add_user_message(HumanMessage(content=message))
-        history.add_ai_message(result)
+        # Save chat history
+        history.add_user_message(message)
+        history.add_ai_message(agent_response["output"])
         session_data["history"] = history
         save_session_history(session_id, session_data)
 
-        return jsonify({"response": result, "sources": [doc.page_content for doc in source_documents]})
+        return jsonify({"response": agent_response['output']})
+
     except Exception as e:
         print(f"Error occurred: {e}")
         return jsonify({"error": str(e)}), 500
@@ -484,13 +535,12 @@ def generate_ai_prompts():
             vector_store = load_vector_store()
 
         # Call the merged function
-        result = generate_prompts_logic(vector_store, model, files_dir)
+        result = generate_prompts_logic(vector_store, llm, files_dir)
 
         return jsonify({"message": "Prompts generated successfully.", **result})
     except Exception as e:
         print(f"Error occurred while generating prompts: {e}")
         return jsonify({"error": str(e)}), 500
-
 
 
 if __name__ == "__main__":
