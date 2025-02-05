@@ -389,7 +389,7 @@ def book_appointment(user_email: str, appointment_time: str, duration_minutes: i
 
 
 # Initialize model and parser
-llm = ChatOpenAI(temperature=0)
+llm = ChatOpenAI(temperature=0.5)
 
 # VectorStore path
 vector_store_path = "faiss_index"
@@ -409,10 +409,6 @@ retrieval_tool = create_retriever_tool(
 
 
 tools = [retrieval_tool, book_appointment]
-
-
-# Retrieval chain for refining answers
-retriever = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 5})
 
 system_prompt = '''
     You are a professional representative for Wattlesol, a leading solutions provider. 
