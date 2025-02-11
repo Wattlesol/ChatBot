@@ -68,7 +68,11 @@ class WattlesolChatBot:
 
     def get_coversational_agent_with_history(self, tools):
         # Load the base system prompt
-        system_prompt = self.load_base_prompts()["system_prompt"]
+        system_prompt_dic = self.load_base_prompts()
+        if system_prompt_dic:
+            system_prompt = system_prompt_dic["system_prompt"]
+        else:
+            system_prompt = "You are helpful asistant for Q&A and Function calling."
         
         # Define the system message prompt with a placeholder for chat history
         prompt = ChatPromptTemplate.from_messages(
@@ -282,7 +286,7 @@ class WattlesolChatBot:
                 raise ValueError(f"Failed to extract JSON from LLM output. Raw Output: {generated_text}")
 
             self.system_prompt = generated_dict
-            self.db_manager.save_base_prompts(generated_dict)
+            self.db_manager.save_base_prompts(generated_dict["system_prompt"])
 
             return generated_dict
 

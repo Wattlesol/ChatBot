@@ -47,9 +47,10 @@ class DatabaseManager:
                 sitemap_url TEXT NOT NULL,
                 extracted_url TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(sitemap_url, extracted_url)
+                UNIQUE(sitemap_url(255), extracted_url(255))
             )
         """)
+
         conn.commit()
 
     def save_base_prompts(self, system_prompt):
@@ -57,9 +58,9 @@ class DatabaseManager:
         cursor = conn.cursor()
         query = """
             INSERT INTO system_prompts (system_prompt)
-            VALUES (%s, %s)
+            VALUES (%s)
         """
-        cursor.execute(query, (system_prompt))
+        cursor.execute(query, (system_prompt,))  # Ensure the tuple is correctly passed
         conn.commit()
 
     def get_latest_base_prompts(self):
