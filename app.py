@@ -1,12 +1,10 @@
-
 from langchain_core.messages import HumanMessage
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-import warnings
-
 from appFiles.chatbot import WattlesolChatBot
 
+import warnings
 warnings.filterwarnings("ignore")
    
 

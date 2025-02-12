@@ -47,7 +47,7 @@ class DatabaseManager:
                 sitemap_url TEXT NOT NULL,
                 extracted_url TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(sitemap_url(255), extracted_url(255))
+                UNIQUE(sitemap_url, extracted_url)
             )
         """)
 

@@ -9,22 +9,23 @@ import os
 current_dir = "appFiles"
 files_dir = os.path.join(current_dir,"important_files")
 TOKEN_PATH = os.path.join(files_dir, 'token.json')
-SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
+SCOPES = ['https://www.googleapis.com/auth/calendar']
+
 
 def get_calender_credentials():
-        cred = None
-        if os.path.exists(TOKEN_PATH):
-            cred = Credentials.from_authorized_user_file(TOKEN_PATH)
-        if not cred or not cred.valid:
-            if cred and cred.expired and cred.refresh_token:
-                cred.refresh(Request())
-            else:
-                cred_file = os.path.join(files_dir,"credentials.json")
-                flow = InstalledAppFlow.from_client_secrets_file(cred_file, SCOPES)
-                cred = flow.run_local_server(port=0)
-            with open(TOKEN_PATH,"w")as Token:
-                Token.write(cred.to_json())
-        return cred 
+    cred = None
+    if os.path.exists(TOKEN_PATH):
+        cred = Credentials.from_authorized_user_file(TOKEN_PATH)
+    if not cred or not cred.valid:
+        if cred and cred.expired and cred.refresh_token:
+            cred.refresh(Request())
+        else:
+            cred_file = os.path.join(files_dir,"credentials.json")
+            flow = InstalledAppFlow.from_client_secrets_file(cred_file, SCOPES)
+            cred = flow.run_local_server(port=0)
+        with open(TOKEN_PATH,"w")as Token:
+            Token.write(cred.to_json())
+    return cred 
 
 def fetch_calendar_events():
     try:
@@ -63,3 +64,7 @@ def format_booked_slots():
             print(f"Skipping event due to error: {event}, error: {e}")
             continue
     return "\n".join(booked_slots)
+
+if __name__ == "__main__":
+    cred = format_booked_slots()
+    print(cred)

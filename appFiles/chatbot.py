@@ -72,7 +72,7 @@ class WattlesolChatBot:
         if system_prompt_dic:
             system_prompt = system_prompt_dic["system_prompt"]
         else:
-            system_prompt = "You are helpful asistant for Q&A and Function calling."
+            raise "NO system Prompt found"
         
         # Define the system message prompt with a placeholder for chat history
         prompt = ChatPromptTemplate.from_messages(
@@ -175,7 +175,6 @@ class WattlesolChatBot:
     def generate_ai_response(self, session_id, message):
         # Retrieve session data and history
         session_data = self.get_session_history(session_id)
-        print(session_data)
         history = session_data["history"]
         booked_slots = session_data["booked_slots"]  # Get already booked slots
 
