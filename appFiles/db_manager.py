@@ -42,6 +42,17 @@ class DatabaseManager:
             )
         """)
         cursor.execute("""
+            CREATE TABLE IF NOT EXISTS booked_appoints (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_fullname VARCHAR(255) NOT NULL,
+                user_email VARCHAR(255) NOT NULL,
+                appointment_start DATETIME NOT NULL,
+                appointment_end DATETIME NOT NULL,
+                duration INT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS sitemaps (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 sitemap_url TEXT NOT NULL,

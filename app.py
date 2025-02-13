@@ -65,12 +65,11 @@ def get_latest_base_prompts():
 def get_chat_history():
     try:
         session_id = request.args.get('session_id')
-        print(session_id)  # Use query param for GET
+        # print(session_id)  # Use query param for GET
         if not session_id:
             return jsonify({"error": "session_id is required"}), 400
         
         session_data = chatbot.get_session_history(session_id)
-        print(session_data)
         history = session_data["history"]
         
         formatted_history = [

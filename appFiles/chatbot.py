@@ -24,7 +24,7 @@ import requests
 import re
 
 from appFiles.db_manager import DatabaseManager
-from appFiles.tools import book_appointment
+from appFiles.tools import book_appointment , datetime_tool
 from appFiles.common_func import format_booked_slots
 warnings.filterwarnings("ignore")
 
@@ -63,7 +63,7 @@ class WattlesolChatBot:
             Not useful for handling appointment bookings or any user-specific account-related inquiries.""",
         )
 
-        self.tools = [self.retrieval_tool, book_appointment]
+        self.tools = [self.retrieval_tool, book_appointment, datetime_tool]
         self.agent_executor = self.get_coversational_agent_with_history(self.tools)
 
     def get_coversational_agent_with_history(self, tools):
@@ -93,6 +93,38 @@ class WattlesolChatBot:
         agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
         return agent_executor
 
+    def generate_ai_response(self, session_id, message):
+        # Retrieve session data and history
+        session_data = self.get_session_history(session_id)
+        history = session_data["history"]
+        booked_slots = session_data["booked_slots"]  # Get already booked slots
+
+        # Pass the history (which now includes booked_slots) as part of the context for the agent
+        conversational_agent_executor = RunnableWithMessageHistory(
+            self.agent_executor,
+            lambda session_id: history,
+            input_messages_key="input",
+            output_messages_key="output",
+            history_messages_key="chat_history",
+        )
+        # 🛠 Invoke the agent executor with the updated context (booked_slots is now part of history)
+        agent_response = conversational_agent_executor.invoke(
+            {
+                "input": message
+            },
+            config={"configurable": {"session_id": session_id}}
+        )
+        # Get the result from the agent response
+        result = agent_response.get("output", "No response generated.")
+        print(result)
+        # Add user and AI messages to the history
+        history.add_user_message(HumanMessage(content=message))
+        history.add_ai_message(result)
+        session_data["history"] = history
+        # Save the updated session history
+        self.save_session_history(session_id, session_data)
+        return result
+    
     def load_base_prompts(self):
         system_prompt = self.db_manager.get_latest_base_prompts()
         if system_prompt:
@@ -172,38 +204,6 @@ class WattlesolChatBot:
         cursor.execute(query, (session_id, pickle.dumps(session_data["history"].messages), session_data["booked_slots"]))
         conn.commit()
  
-    def generate_ai_response(self, session_id, message):
-        # Retrieve session data and history
-        session_data = self.get_session_history(session_id)
-        history = session_data["history"]
-        booked_slots = session_data["booked_slots"]  # Get already booked slots
-
-        # Pass the history (which now includes booked_slots) as part of the context for the agent
-        conversational_agent_executor = RunnableWithMessageHistory(
-            self.agent_executor,
-            lambda session_id: history,
-            input_messages_key="input",
-            output_messages_key="output",
-            history_messages_key="chat_history",
-        )
-        # 🛠 Invoke the agent executor with the updated context (booked_slots is now part of history)
-        agent_response = conversational_agent_executor.invoke(
-            {
-                "input": message
-            },
-            config={"configurable": {"session_id": session_id}}
-        )
-        # Get the result from the agent response
-        result = agent_response.get("output", "No response generated.")
-        print(result)
-        # Add user and AI messages to the history
-        history.add_user_message(HumanMessage(content=message))
-        history.add_ai_message(result)
-        session_data["history"] = history
-        # Save the updated session history
-        self.save_session_history(session_id, session_data)
-        return result
-
     def rescrape_sitemap(self, sitemap_url):
         """
         Rescrape a sitemap and update the database with its URLs.
@@ -235,10 +235,17 @@ class WattlesolChatBot:
             context = "\n\n".join([doc.page_content for doc in top_docs])
             example = {
                 "system_prompt":'''
-            You are a professional representative for Wattlesol, a leading solutions provider.  
-            Your responses should always be polite, professional, and concise, focusing on key points related to Wattlesol's expertise.  
-            For normal user queries, respond clearly in 2-3 sentences.  
-            For function-calling queries, identify the necessary action and guide the user accordingly.
+            You are a professional representative for Wattlesol, a leading solutions provider in AI-powered automation tools for businesses. Your responses should always be polite, professional, and concise, focusing on key points related to Wattlesol's expertise. For general inquiries, respond clearly in 2-3 sentences.
+
+            If a user expresses interest in booking an appointment, follow this process:
+
+            1. Collect user details – Ask for their full name, email, preferred appointment date and time, and duration (default: 30 minutes).
+            2.Handle missing details – If any information is missing, prompt the user to provide it. If the date is unspecified, default to the next available day. If the time is not valid, suggest an alternative.
+            3. Confirm appointment details – Summarize the provided details and ask the user to confirm with all details before proceeding.
+            4. Book the appointment – If the user confirms, use the book_appointment tool to finalize the booking.
+            5. Handle scheduling conflicts – If the chosen time slot is unavailable, notify the user and suggest an alternative.
+
+            Maintain professionalism throughout and ensure clarity in the process.
             '''
             }
 
