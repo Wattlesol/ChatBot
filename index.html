@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SocketIO WebSocket Test</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.min.js"></script>
+</head>
+<body>
+    <h1>WebSocket Test with Flask-SocketIO</h1>
+
+    <div id="status">Not connected</div>
+
+    <button id="connectButton">Connect to Chat</button>
+    <button id="sendMessageButton" disabled>Send Message</button>
+
+    <div id="response"></div>
+
+    <script>
+        // Establish WebSocket connection to the server
+        let socket;
+
+        const statusElement = document.getElementById('status');
+        const connectButton = document.getElementById('connectButton');
+        const sendMessageButton = document.getElementById('sendMessageButton');
+        const responseElement = document.getElementById('response');
+
+        // Handle connection
+        connectButton.addEventListener('click', () => {
+            socket = io('http://localhost:80');  // Replace with your Flask-SocketIO server URL
+
+            socket.on('connect', () => {
+                statusElement.innerHTML = 'Connected to the server';
+                connectButton.disabled = true;
+                sendMessageButton.disabled = false;
+            });
+
+            socket.on('welcome', (data) => {
+                responseElement.innerHTML = 'Welcome message: ' + data.message;
+            });
+
+            socket.on('response', (data) => {
+                responseElement.innerHTML = 'Server Response: ' + data.response;
+            });
+
+            socket.on('error', (data) => {
+                responseElement.innerHTML = 'Error: ' + data.error;
+            });
+        });
+
+        // Send a message to the server
+        sendMessageButton.addEventListener('click', () => {
+            const session_id = '12345';  // Example session ID
+            const message = 'Hello from frontend!';
+
+            socket.emit('message', { session_id, message });
+        });
+    </script>
+</body>
+</html>

@@ -26,6 +26,7 @@ import re
 from appFiles.db_manager import DatabaseManager
 from appFiles.tools import book_appointment , datetime_tool
 from appFiles.common_func import format_booked_slots
+from appFiles.controllers.utils import load_base_prompts
 warnings.filterwarnings("ignore")
 
 # Load environment variables
@@ -39,23 +40,22 @@ os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
 
 class WattlesolChatBot:
     def __init__(self):
-        current_dir = "appFiles"
-        self.files_dir = os.path.join(current_dir,"important_files")
-        self.history_dir = os.path.join(current_dir,"chat_histories")
-        self.vector_store_path = os.path.join(current_dir,"faiss_index") 
-        os.makedirs(self.history_dir, exist_ok=True)
-        os.makedirs(self.files_dir, exist_ok=True)
-        
-        self.TOKEN_PATH = os.path.join(self.files_dir, 'token.json')
+
+        self.vector_store_path = os.getenv("VECTORSTORE_PATH")
 
         self.db_manager = DatabaseManager()
         self.SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
+
+        system_prompt_dic = load_base_prompts(self.db_manager)
+        if system_prompt_dic:
+            self.system_prompt = system_prompt_dic["system_prompt"]
+        else:
+            raise "NO system Prompt found"
 
         self.llm = ChatOpenAI(temperature=0.5)
         self.parser = StrOutputParser()
 
         self.vector_store = self.load_vector_store()
-        self.system_prompt = self.load_base_prompts()
         self.retrieval_tool = create_retriever_tool(
             self.vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 5}),
             name="company_general_chat",
@@ -67,18 +67,11 @@ class WattlesolChatBot:
         self.agent_executor = self.get_coversational_agent_with_history(self.tools)
 
     def get_coversational_agent_with_history(self, tools):
-        # Load the base system prompt
-        system_prompt_dic = self.load_base_prompts()
-        if system_prompt_dic:
-            system_prompt = system_prompt_dic["system_prompt"]
-        else:
-            raise "NO system Prompt found"
-        
         # Define the system message prompt with a placeholder for chat history
         prompt = ChatPromptTemplate.from_messages(
             [
                 SystemMessagePromptTemplate(
-                    prompt=PromptTemplate(input_variables=[], template=system_prompt)
+                    prompt=PromptTemplate(input_variables=[], template=self.system_prompt)
                 ),
                 MessagesPlaceholder(variable_name='chat_history', optional=True),
                 HumanMessagePromptTemplate(
@@ -124,12 +117,6 @@ class WattlesolChatBot:
         # Save the updated session history
         self.save_session_history(session_id, session_data)
         return result
-    
-    def load_base_prompts(self):
-        system_prompt = self.db_manager.get_latest_base_prompts()
-        if system_prompt:
-            return system_prompt
-        return {}
 
     def load_vector_store(self):
         # Check if the vector store exists on disk
@@ -140,6 +127,7 @@ class WattlesolChatBot:
                 raise RuntimeError(f"Error loading vector store: {e}")
         else:
             # Retrieve the latest sitemap URLs from the database
+            print("Rescraping the sitemap")
             conn = self.db_manager.get_connection()
             cursor = conn.cursor(dictionary=True)
 
@@ -240,7 +228,7 @@ class WattlesolChatBot:
             If a user expresses interest in booking an appointment, follow this process:
 
             1. Collect user details – Ask for their full name, email, preferred appointment date and time, and duration (default: 30 minutes).
-            2.Handle missing details – If any information is missing, prompt the user to provide it. If the date is unspecified, default to the next available day. If the time is not valid, suggest an alternative.
+            2. Handle missing details – If any information is missing, prompt the user to provide it. If the date is unspecified, default to the next available day. If the time is not valid, suggest an alternative. Prompt the user to provide the missing details. If the user provides a relative date (e.g., "coming Monday"), use the datetime_tool to calculate the actual date of the next Monday from the current date. If the time is not valid, suggest an alternative based on available slots.
             3. Confirm appointment details – Summarize the provided details and ask the user to confirm with all details before proceeding.
             4. Book the appointment – If the user confirms, use the book_appointment tool to finalize the booking.
             5. Handle scheduling conflicts – If the chosen time slot is unavailable, notify the user and suggest an alternative.

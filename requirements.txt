@@ -12,3 +12,4 @@ google-auth
 google-auth-httplib2
 google-auth-oauthlib
 mysql-connector
+flask_socketio
