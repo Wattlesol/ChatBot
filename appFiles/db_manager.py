@@ -4,19 +4,18 @@ import os
 
 class DatabaseManager:
     def __init__(self):
-        self.conn = mysql.connector.connect(
-            host=os.getenv("MYSQL_HOST"),
-            user=os.getenv("MYSQL_USER"),
-            password=os.getenv("MYSQL_PASSWORD"),
-            database=os.getenv("MYSQL_DB"),
-            pool_name="chatbot_pool",
-            pool_size=10,
-        )
-        # self.initialize_database()
+        pass
 
     def get_connection(self):
-        if not self.conn.is_connected():
-            self.conn.reconnect(attempts=3, delay=5)
+        try:
+            self.conn = mysql.connector.connect(pool_name="chatbot_pool")
+        except mysql.connector.errors.PoolError:
+            self.conn = mysql.connector.connect(
+                host=os.getenv("MYSQL_HOST"),
+                user=os.getenv("MYSQL_USER"),
+                password=os.getenv("MYSQL_PASSWORD"),
+                database=os.getenv("MYSQL_DB")
+            )
         return self.conn
 
     def close_connection(self):
@@ -106,3 +105,4 @@ class DatabaseManager:
         for url in urls:
             cursor.execute(query, (sitemap_url, url))
         conn.commit()
+        
