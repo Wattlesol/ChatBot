@@ -1,8 +1,9 @@
 from langchain_core.messages import HumanMessage
+import eventlet
+eventlet.monkey_patch()
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit 
-
 import logging
 import warnings
 
@@ -108,5 +109,5 @@ def get_chat_history():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=80, debug=True)
+    socketio.run(app, host="0.0.0.0", port=80, debug=True, allow_unsafe_werkzeug=True)
     app.run(host="0.0.0.0", port=8000, debug=True)
