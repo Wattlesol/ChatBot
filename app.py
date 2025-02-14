@@ -15,7 +15,7 @@ warnings.filterwarnings("ignore", message="USER_AGENT environment variable not s
 
 # Flask app
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins="*", methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["Content-Type"])
 
 socketio = SocketIO(app, cors_allowed_origins="*")
 
