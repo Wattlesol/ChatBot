@@ -21,7 +21,7 @@ from xml.etree import ElementTree
 import os, json, pickle
 import warnings
 import requests
-import re
+import re ,time
 
 from appFiles.db_manager import DatabaseManager
 from appFiles.tools import book_appointment , datetime_tool
@@ -43,7 +43,10 @@ class WattlesolChatBot:
 
         self.vector_store_path = os.getenv("VECTORSTORE_PATH")
 
+        start_time = time.time()
         self.db_manager = DatabaseManager()
+        end_time = time.time()
+        print("Time to load db in seconds:",end_time-start_time)
         self.SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 
         system_prompt_dic = load_base_prompts(self.db_manager)
@@ -54,15 +57,14 @@ class WattlesolChatBot:
 
         self.llm = ChatOpenAI(temperature=0.5)
         self.parser = StrOutputParser()
-
         self.vector_store = self.load_vector_store()
+
         self.retrieval_tool = create_retriever_tool(
             self.vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 5}),
             name="company_general_chat",
             description="""Useful when you need to answer general queries related to the company's services, policies, and FAQs.
             Not useful for handling appointment bookings or any user-specific account-related inquiries.""",
         )
-
         self.tools = [self.retrieval_tool, book_appointment, datetime_tool]
         self.agent_executor = self.get_coversational_agent_with_history(self.tools)
 

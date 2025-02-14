@@ -12,7 +12,7 @@ class DatabaseManager:
             pool_name="chatbot_pool",
             pool_size=10,
         )
-        self.initialize_database()
+        # self.initialize_database()
 
     def get_connection(self):
         if not self.conn.is_connected():

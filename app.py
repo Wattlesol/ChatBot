@@ -1,6 +1,8 @@
-from langchain_core.messages import HumanMessage
 import eventlet
 eventlet.monkey_patch()
+import time
+start_time = time.time()
+from langchain_core.messages import HumanMessage
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit 
@@ -9,7 +11,8 @@ import warnings
 
 from appFiles.chatbot import WattlesolChatBot
 
-warnings.filterwarnings("ignore")
+warnings.filterwarnings("ignore", message="USER_AGENT environment variable not set, consider setting it to identify your requests.")
+
 # Flask app
 app = Flask(__name__)
 CORS(app)
@@ -110,4 +113,3 @@ def get_chat_history():
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=80, debug=True, allow_unsafe_werkzeug=True)
-    app.run(host="0.0.0.0", port=8000, debug=True)
