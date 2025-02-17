@@ -183,7 +183,7 @@ def handle_message(data):
     try:
         result = chatbot.generate_ai_response(session_id, message)
         print(f"Sending response to session {session_id}: {result}")  # Debugging
-        emit("response", {"response": result},broadcast=True)
+        emit("response", {"response": result})
         print("Sent")
     except Exception as e:
         logging.error(f"Error generating response: {e}")

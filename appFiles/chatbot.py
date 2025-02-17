@@ -55,7 +55,7 @@ class WattlesolChatBot:
         else:
             raise "NO system Prompt found"
 
-        self.llm = ChatOpenAI(temperature=0.5)
+        self.llm = ChatOpenAI(temperature=0.1)
         self.parser = StrOutputParser()
         self.vector_store = self.load_vector_store()
 
