@@ -3,7 +3,7 @@ from datetime import datetime, timezone ,timedelta
 from googleapiclient.discovery import build
 from langchain.tools import Tool
 
-from appFiles.common_func import get_calender_credentials
+from appFiles.common_func import get_calender_credentials ,send_appointment_confirmation_email
 from appFiles.db_manager import DatabaseManager
 
 @tool(parse_docstring=True)
@@ -77,13 +77,16 @@ def book_appointment(user_fullname: str, user_email: str, appointment_time: str,
 
         print(f"✅ Appointment successfully created! Event ID: {created_event['id']}")
         print(f"📌 View event: {created_event['htmlLink']}")
+        # Save appointment to the database
         save_appointment_to_db(user_fullname,user_email,appointment_time,duration_minutes)
+        # ✅ Step 4: Send Confirmation Email
+        formatted_time = start_time.strftime('%A, %b %d, %Y, %I:%M %p')  # Convert time to readable format
+        send_appointment_confirmation_email(creds,user_email, user_fullname, formatted_time, duration_minutes)
 
         return {
-            "message": "Appointment booked successfully.",
+            "message": "Appointment booked successfully. A confirmation email has been sent. Please Check....",
             "event_id": created_event["id"],
-            "event_link": created_event["htmlLink"],
-            "start_time": start_time.strftime('%A, %b %d, %Y, %I:%M %p'),
+            "start_time": formatted_time,
             "end_time": end_time.strftime('%I:%M %p')
         }
 
@@ -137,8 +140,6 @@ def save_appointment_to_db(user_fullname: str, user_email: str, appointment_time
     except Exception as e:
         print(f"⚠️ Error saving appointment: {e}")
         return {"message": str(e), "status": "error"}
-
-from datetime import datetime
 
 datetime_tool = Tool(
     name="Datetime",

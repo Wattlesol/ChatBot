@@ -3,14 +3,16 @@ from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 from googleapiclient.errors import HttpError
 from google_auth_oauthlib.flow import InstalledAppFlow
-from datetime import datetime
+
 import os
+import base64
+from datetime import datetime
+from email.message import EmailMessage
 
 current_dir = "appFiles"
 files_dir = os.path.join(current_dir,"important_files")
 TOKEN_PATH = os.path.join(files_dir, 'token.json')
-SCOPES = ['https://www.googleapis.com/auth/calendar']
-
+SCOPES = ['https://www.googleapis.com/auth/calendar',"https://www.googleapis.com/auth/gmail.send"]
 
 def get_calender_credentials():
     cred = None
@@ -65,6 +67,61 @@ def format_booked_slots():
             continue
     return "\n".join(booked_slots)
 
-if __name__ == "__main__":
-    cred = format_booked_slots()
-    print(cred)
+def send_appointment_confirmation_email(creds: Credentials,user_email: str, user_fullname: str, appointment_time: str, duration_minutes: int):
+    """
+    Sends a confirmation email to both the user and the host after the appointment is successfully booked.
+    Uses Gmail API with OAuth credentials for email sending.
+
+    Args:
+        user_email (str): The email of the user.
+        user_fullname (str): The name of the user.
+        appointment_time (str): The appointment start time in a readable format (e.g., 'Monday, Feb 20, 2025, 10:30 AM').
+        duration_minutes (int): Duration of the appointment in minutes.
+
+    Returns:
+        None
+    """
+
+    try:
+        # Build the Gmail API service
+        service = build('gmail', 'v1', credentials=creds)
+
+        # Create the email message
+        message = EmailMessage()
+        message.set_content(f"""
+        Hello {user_fullname},
+
+        Your appointment has been successfully scheduled.
+
+        Appointment Details:
+        - Date & Time: {appointment_time}
+        - Duration: {duration_minutes} minutes
+
+        Looking forward to meeting you!
+
+        Best regards,
+            Team Wattlesol
+        """)
+        
+
+        # Set email headers
+        message["To"] = f"awaisjutt2512@gmail.com, {user_email}"  # Send to both user and host
+        message["From"] = "awaisjutt2512@gmail.com"  # Use your email as sender
+        message["Subject"] = "Appointment Confirmation"
+
+        # Encode the message
+        encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
+
+        # Create the message object for Gmail API
+        create_message = {"raw": encoded_message}
+
+        # Send the email using Gmail API
+        send_message = service.users().messages().send(userId="me", body=create_message).execute()
+
+        print(f"✅ Confirmation email sent successfully! Message Id: {send_message['id']}")
+
+    except HttpError as error:
+        print(f"⚠️ Error occurred while sending email: {error}")
+        send_message = None
+
+    return send_message
