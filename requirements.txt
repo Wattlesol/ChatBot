@@ -14,3 +14,4 @@ google-auth-oauthlib
 mysql-connector
 flask_socketio
 eventlet
+sentry-sdk[flask]
